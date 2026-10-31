@@ -18,7 +18,7 @@ Cubre la definición de LMS del curso: **cursos, contenidos educativos, evaluaci
 
 ---
 
-## ✅ Requisitos del proyecto (enunciado del profesor)
+## ✅ Requisitos del proyecto
 
 - Arquitectura **multi-tenancy**, **serverless** y **basada en eventos (EDA)**.
 - Mínimo **5 microservicios protegidos** (nosotros tenemos 6) (API Gateway + Lambda), cada uno con **su propia base de datos** (DynamoDB) y su **estructura JSON** documentada.
