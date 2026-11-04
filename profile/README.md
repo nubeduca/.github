@@ -99,7 +99,7 @@ Nadie hace solo backend o solo frontend: todos tocan las dos partes y todos tien
 
 | Rol | Módulo | Tarea transversal | Elegido por |
 |---|---|---|---|
-| **1** | Usuarios y acceso | Base del frontend (layout, login, rutas) + despliegue en **Amplify** | |
+| **1** | Usuarios y acceso | Base del frontend (layout, login, rutas) + despliegue en **Amplify** | Benja |
 | **2** | Cursos e inscripciones | Compilar el **informe** final | Brando  |
 | **3** | Contenidos (S3) | **Diagrama de arquitectura** | Alexander |
 | **4** | Evaluaciones y entregas | Compilar el **PowerPoint** final | Fabricio |
