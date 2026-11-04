@@ -18,7 +18,7 @@ Cubre la definición de LMS del curso: **cursos, contenidos educativos, evaluaci
 
 ---
 
-## ✅ Requisitos del proyecto
+## ✅ Requisitos del proyecto (enunciado del profesor)
 
 - Arquitectura **multi-tenancy**, **serverless** y **basada en eventos (EDA)**.
 - Mínimo **5 microservicios protegidos** (nosotros tenemos 6) (API Gateway + Lambda), cada uno con **su propia base de datos** (DynamoDB) y su **estructura JSON** documentada.
@@ -99,10 +99,10 @@ Nadie hace solo backend o solo frontend: todos tocan las dos partes y todos tien
 
 | Rol | Módulo | Tarea transversal | Elegido por |
 |---|---|---|---|
-| **1** | Usuarios y acceso | Base del frontend (layout, login, rutas) + despliegue en **Amplify** | Benja |
-| **2** | Cursos e inscripciones | Compilar el **informe** final | Brando  |
-| **3** | Contenidos (S3) | **Diagrama de arquitectura** | Alexander |
-| **4** | Evaluaciones y entregas | Compilar el **PowerPoint** final | Fabricio |
+| **1** | Usuarios y acceso | Base del frontend (layout, login, rutas) + despliegue en **Amplify** | |
+| **2** | Cursos e inscripciones | Compilar el **informe** final | |
+| **3** | Contenidos (S3) | **Diagrama de arquitectura** | Alexander León |
+| **4** | Evaluaciones y entregas | Compilar el **PowerPoint** final | |
 | **5** | Calificaciones y seguimiento | **Despliegue final** de todo el backend en una sola cuenta AWS + colección Postman unificada | |
 | **6** | Notificaciones | **Guion de la demo** con 2 tenants + video de respaldo | |
 
@@ -238,7 +238,7 @@ Nadie hace solo backend o solo frontend: todos tocan las dos partes y todos tien
 
 ## 🎯 Primera presentación con el asesor (avance del 30%)
 
-La rúbrica le da **3 puntos** a esta exposición virtual y pide un **avance proporcional al 30%**.
+La rúbrica le da **3 puntos** a esta exposición virtual y pide un **avance proporcional al 30%**. Cada uno muestra lo suyo; así todos suman al avance.
 
 **Lo que debe verse como grupo**
 - [ ] Idea del SaaS (LMS multi-tenant) y los 6 módulos.
@@ -248,10 +248,24 @@ La rúbrica le da **3 puntos** a esta exposición virtual y pide un **avance pro
 - [ ] **Frontend base publicado en Amplify** con login (rol 1).
 - [ ] **Diapositivas del avance** (rol 4 las junta; cada uno aporta 1).
 
+**Lo que muestra cada uno**
+
+| Rol | Avance para la presentación |
+|---|---|
+| **1** | Registro, login y validar token funcionando en Postman · tabla con 30k usuarios · frontend base en Amplify con la pantalla de login |
+| **2** | CRUD de cursos e inscripción en Postman · tabla con 30k cursos · pantalla de catálogo de cursos |
+| **3** | Subir un material con URL prefirmada y ver el evento de S3 · tabla con 30k contenidos · **diagrama de arquitectura v1** |
+| **4** | Crear y listar evaluaciones (sin respuestas para el estudiante) en Postman · tabla con 30k evaluaciones · **diapositivas del avance** |
+| **5** | Calificar una tarea y ver el reporte del curso en Postman · tabla con 30k calificaciones · pantalla de mis notas |
+| **6** | Recibir un evento simulado (`aws sns publish`) y que llegue el email · tabla con 30k notificaciones · bandeja de notificaciones |
+
+Cada uno presenta su módulo en **1–2 minutos**: qué hace, su estructura JSON y una prueba en vivo o en captura.
 
 **Lo que queda para después del avance (el 70% restante):** proteger todas las APIs con el token, conectar los eventos entre módulos, completar las pantallas del frontend, el despliegue final en una sola cuenta, el informe, el PowerPoint final y la demo con 2 tenants.
 
 ---
+
+> 📘 **Antes de empezar, lee [Contratos y dependencias](https://github.com/nubeduca/.github/blob/main/docs/CONTRATOS-Y-DEPENDENCIAS.md):** nombres, claves, formatos de eventos, `validar_token.py` y qué necesita cada rol para avanzar sin esperar a nadie.
 
 ## ⚡ Eventos entre módulos
 
