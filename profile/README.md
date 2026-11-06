@@ -100,7 +100,7 @@ Nadie hace solo backend o solo frontend: todos tocan las dos partes y todos tien
 | Rol | Módulo | Tarea transversal | Elegido por |
 |---|---|---|---|
 | **1** | Usuarios y acceso | Base del frontend (layout, login, rutas) + despliegue en **Amplify** | |
-| **2** | Cursos e inscripciones | Compilar el **informe** final | |
+| **2** | Cursos e inscripciones | Compilar el **informe** final | Brando |
 | **3** | Contenidos (S3) | **Diagrama de arquitectura** | Alexander León |
 | **4** | Evaluaciones y entregas | Compilar el **PowerPoint** final | |
 | **5** | Calificaciones y seguimiento | **Despliegue final** de todo el backend en una sola cuenta AWS + colección Postman unificada | |
