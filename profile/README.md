@@ -4,292 +4,249 @@
 
 Nubeduca es un **LMS (Learning Management System) SaaS multi-tenant**: una sola plataforma que varias instituciones educativas usan al mismo tiempo, cada una con sus datos totalmente aislados. Proyecto Final del curso **CS2032 Cloud Computing (UTEC, 2026-2)**.
 
+> **Para empezar:** lee la [arquitectura](#️-arquitectura), busca tus tareas en [Equipo y responsabilidades](#-equipo-y-responsabilidades) y trabaja siempre contra los contratos de [`nubeduca-contratos`](https://github.com/nubeduca/nubeduca-contratos).
+
 ---
 
 ## 🎯 Qué hace
 
 | Usuario | Puede |
 |---|---|
-| 👩‍🏫 **Docente** | Crear cursos, publicar materiales, crear evaluaciones (quizzes y tareas), calificar y ver el reporte de su curso |
-| 🧑‍🎓 **Estudiante** | Inscribirse en cursos, revisar materiales, rendir evaluaciones y consultar sus notas y su progreso |
-| 🏫 **Tenant** | Cada institución: `UTEC`, `UPC`, `PUCP` |
+| 👩‍🏫 **Docente** | Crear cursos y matricular alumnos (CSV), publicar módulos con archivos, crear tareas, calificar y publicar notas, enviar anuncios |
+| 🧑‍🎓 **Estudiante** | Ver sus cursos y módulos, descargar materiales, entregar tareas, ver sus notas y recibir avisos por email |
+| 🛠️ **Administrador** | Gestionar la institución, sus periodos académicos y sus usuarios |
+| 🏫 **Tenant** | Cada institución: `utec`, `upc`, `pucp` |
 
-Cubre la definición de LMS del curso: **cursos, contenidos educativos, evaluaciones y seguimiento de estudiantes**.
+**Gate de la Fase 1 (lo que se demuestra con 2 tenants):** en el curso piloto, el docente publica contenido y una tarea, los alumnos entregan, el docente califica y cada alumno ve su nota y recibe el aviso.
 
 ---
 
 ## ✅ Requisitos del proyecto (enunciado del profesor)
 
-- Arquitectura **multi-tenancy**, **serverless** y **basada en eventos (EDA)**.
-- Mínimo **5 microservicios protegidos** (nosotros tenemos 6) (API Gateway + Lambda), cada uno con **su propia base de datos** (DynamoDB) y su **estructura JSON** documentada.
-- **30,000 registros ficticios por microservicio**, divididos en **3 tenants**.
-- Uso de **S3, SNS y SQS**.
-- Todo el despliegue automatizado con **Serverless Framework**.
-- **Frontend** en cualquier framework, desplegado en **AWS Amplify**.
-- **Diagrama de arquitectura** y **demo con 2 tenants**.
-- **Informe** (con enlaces públicos a los repos y diseño de BD de cada microservicio) y **PowerPoint**.
+La rúbrica manda: si el diseño choca con ella, gana la rúbrica.
+
+| Requisito | Cómo lo cumplimos | Tareas |
+|---|---|---|
+| SaaS multi-tenant | `tenant_id` en el token, en cada evento y en la clave de cada tabla | AUTH-01, LIB-01 |
+| Serverless | API Gateway + Lambda, DynamoDB, EventBridge, SQS y SNS | LIB-01, PLT-05 |
+| Basada en eventos | Outbox con DynamoDB Streams + Pipes → EventBridge → una SQS por consumidor; SNS FIFO para notas | PLT-04, GATE-0 |
+| Mínimo 5 microservicios protegidos | 6 microservicios, cada uno con su API Gateway y authorizer de Cognito | AUTH-01, PLT-05 |
+| BD propia por microservicio | DynamoDB en los 6 (ADR-007) | — |
+| Estructura JSON por microservicio | En el README de cada `nubeduca-ms-*` y en el informe | Tareas con seed, DOC-02 |
+| 30.000 registros en 3 tenants | `poblar_datos.py` por microservicio, 10.000 por tenant | ACA-02, ACA-03, CON-02, EVA-01, EVA-02, ENG-01 |
+| Uso de S3, SNS y SQS | S3 para archivos y entregas, SNS para notas (FIFO) y email, SQS por consumidor | CON-01, PLT-04, ENG-01 |
+| Despliegue con Serverless Framework | Un `serverless.yml` por stack | PLT-01 a PLT-06 |
+| Frontend en Amplify | Shell web y pantallas por módulo | FE-01, FE-02, FE-03 |
+| Diagrama de arquitectura | draw.io con íconos AWS | DOC-01 |
+| Demo con 2 tenants | Guion y video con UTEC y UPC | QA-01, DOC-03 |
+| Informe y PowerPoint | Informe con enlaces a los repos y diseño de BD | DOC-02, DOC-03 |
 
 ---
 
 ## 🏗️ Arquitectura
 
-```mermaid
-flowchart LR
-    USR["Docente / Estudiante"] --> FE["Frontend React<br/>AWS Amplify"]
-    FE --> MS1["ms-usuarios"] --> D1[("DynamoDB")]
-    FE --> MS2["ms-cursos"] --> D2[("DynamoDB")]
-    FE --> MS3["ms-contenidos"] --> D3[("DynamoDB")]
-    FE --> MS4["ms-evaluaciones"] --> D4[("DynamoDB")]
-    FE --> MS5["ms-calificaciones"] --> D5[("DynamoDB")]
-    FE --> MS6["ms-notificaciones"] --> D6[("DynamoDB")]
-    FE -. "URL prefirmada" .-> S3[("S3 materiales")]
-    MS2 & MS3 & MS4 & MS5 & MS6 -. "validar token" .-> MS1
-    S3 -- "evento" --> MS3
-    MS1 -- "usuario-registrado" --> BUS{{"SNS → SQS"}}
-    MS2 -- "estudiante-inscrito" --> BUS
-    MS3 -- "material-publicado" --> BUS
-    MS5 -- "nota-publicada" --> BUS
-    BUS --> MS6
-    MS4 -- "entrega-enviada" --> BUS2{{"SNS → SQS"}} --> MS5
-    MS6 -- "notificaciones" --> MAIL["📧 Email (SNS)"]
-```
+![Arquitectura de Nubeduca](https://raw.githubusercontent.com/nubeduca/.github/main/nubeduca-arquitectura.drawio.png)
 
-Cada microservicio = **API Gateway + Lambdas (Python) + DynamoDB**, desplegado con su propio `serverless.yml`.
+*Diagrama editable: [`nubeduca-arquitectura.drawio`](https://github.com/nubeduca/.github/blob/main/nubeduca-arquitectura.drawio)*
 
-### Flujos basados en eventos
+### Cómo fluye una petición
 
-1. **Docente sube un material** → llega a **S3** → evento → se publica `material-publicado` (**SNS**) → **SQS** de ms-notificaciones → **email** a los alumnos inscritos.
-2. **Alumno rinde un quiz** → se publica `entrega-enviada` (**SNS**) → **SQS** de ms-calificaciones → se califica automáticamente → se publica `nota-publicada` → **SQS** de ms-notificaciones → **email** al alumno con su nota.
+1. El navegador carga el frontend desde **AWS Amplify Hosting**.
+2. El usuario inicia sesión en **Amazon Cognito**. El token trae `tenant_id` y rol.
+3. Cada llamada va a la **API Gateway** del microservicio dueño. El authorizer de Cognito valida el token, y la Lambda toma `tenant_id` del token, nunca del body.
+4. La **Lambda** escribe en la tabla **DynamoDB** de su microservicio y, en la misma transacción, el evento (registro `EVENTO#`). Ningún microservicio lee la tabla de otro. Los archivos suben directo a **S3** con URL prefirmada.
+5. **DynamoDB Streams** y **EventBridge Pipes** llevan cada evento al bus **`lms`**. **Schema Registry** guarda los contratos y **Archive** permite reprocesar.
+6. Una **regla** por consumidor copia el evento a su cola **SQS** con **DLQ**. La Lambda consumidora lo procesa una sola vez (idempotente).
+7. ms-calificaciones publica además las notas en **SNS FIFO** con grupo `tenant_id:course_id`, y llegan en orden a la cola **SQS FIFO** de ms-notificaciones.
+8. ms-notificaciones avisa por **email** con Amazon SNS, según las preferencias del usuario.
+9. **CloudWatch** y **X-Ray** observan todo. **Serverless Framework** despliega cada microservicio como un stack de CloudFormation.
 
----
+### Principios
 
-## 🧩 Repositorios
+1. **Cada servicio es dueño de sus datos.** Nadie lee ni escribe la base de otro. Se integra por eventos o por su API.
+2. **Eventos = hechos en pasado** (`submission.graded`). Los comandos son llamadas síncronas al servicio dueño, nunca mensajes en el bus.
+3. **Coreografía por defecto.** Los servicios reaccionan a eventos sin conocerse entre sí.
+4. **Transactional outbox.** El cambio y el evento se guardan en la misma transacción. Nunca "guardar y luego publicar".
+5. **Consumidores idempotentes.** La entrega es at-least-once: cada consumidor registra el `eventId` y descarta duplicados.
+6. **Orden solo donde importa** (notas): SNS FIFO → SQS FIFO. En el resto se descartan eventos con `aggregateVersion` vieja.
+7. **Contratos versionados.** Un cambio incompatible es un tipo nuevo (`.v2`).
+8. **Multi-tenant desde el día uno.** `tenant_id` va en el token, en cada evento y en la clave de partición.
 
-| Repo | Contenido |
+### Decisiones tomadas (ADR)
+
+| ADR | Decisión |
 |---|---|
-| `nubeduca-ms-usuarios` | Registro, login, token y validación |
-| `nubeduca-ms-cursos` | Cursos e inscripciones |
-| `nubeduca-ms-contenidos` | Materiales del curso en S3 |
-| `nubeduca-ms-evaluaciones` | Quizzes, tareas y entregas |
-| `nubeduca-ms-calificaciones` | Notas, progreso y reportes |
-| `nubeduca-ms-notificaciones` | Avisos por email y bandeja de notificaciones |
-| `nubeduca-frontend` | Aplicación web en Amplify (todos aportan sus pantallas) |
+| ADR-001 | **6 microservicios desplegables**, cada uno agrupa varios dominios lógicos |
+| ADR-002 | **Construir desde cero** (no envolver Moodle) |
+| ADR-003 | **EventBridge + SQS / SNS** como broker de eventos |
+| ADR-005 | **Pool:** los 3 tenants comparten tablas, con `tenant_id` en la clave |
+| ADR-006 | **Lambda + API Gateway** para el cómputo |
+| ADR-007 | **DynamoDB** en los 6 microservicios (sin VPC ni RDS) |
+
+El documento completo de arquitectura de solución (contexto, mapa de capacidades vs. Moodle/Canvas/Blackboard, catálogo de 21 servicios, patrones, stack, riesgos y prueba de estrés) lo mantiene Dev 3.
 
 ---
 
-## ⚖️ Cómo está dividido
+## 🧩 Microservicios y eventos
 
-Somos 6 y el proyecto tiene **6 microservicios**, así que **todos hacen exactamente lo mismo**, cada uno con su propio módulo:
+Los 21 servicios lógicos del diseño se agrupan en **6 microservicios**, uno por repo `nubeduca-ms-*`. Cada uno tiene su API Gateway, sus Lambdas, su tabla DynamoDB y su seed de 30.000 registros.
 
-| Cada integrante hace… | |
-|---|---|
-| 🛠️ **Backend** | 1 microservicio completo: API Gateway + Lambdas + DynamoDB, desplegado con Serverless Framework |
-| 🖥️ **Frontend** | Las pantallas de su módulo dentro del frontend común (un solo repo en Amplify) |
-| ⚡ **Eventos** | Publica y/o consume eventos SNS/SQS de su módulo |
-| 🗃️ **Datos** | Su script de 30,000 registros (10,000 por tenant) y la estructura JSON de sus tablas |
-| 📄 **Documentación** | Su sección del informe y sus diapositivas |
-| 🎤 **Demo** | Presenta su módulo en la exposición |
-| 🤝 **Tarea transversal** | Una tarea del grupo (ver la tabla de roles) |
+| Microservicio | Servicios lógicos | `source` | Publica | Consume | Tareas |
+|---|---|---|---|---|---|
+| **ms-usuarios** | Tenant y Organización, Usuarios y Perfiles | `lms.users` | `tenant.created`, `term.started`, `user.provisioned` | — | ACA-01, ACA-02 |
+| **ms-cursos** | Cursos y Secciones, Matrícula, Anuncios | `lms.courses` | `course.created`, `course.published`, `course.archived`, `enrollment.created`, `enrollment.dropped`, `announcement.published` | `term.started`, `user.provisioned` | ACA-03, ACA-04, COL-01 |
+| **ms-contenidos** | Contenido y Módulos, Archivos y Media (S3) | `lms.content` | `file.scanned`, `module.published` | `course.created`, `enrollment.*` | CON-01, CON-02 |
+| **ms-evaluaciones** | Tareas y Entregas | `lms.assessment` | `assignment.published`, `submission.submitted`, `submission.graded` | `enrollment.*`, `file.scanned` | EVA-01 |
+| **ms-calificaciones** | Calificaciones, Auditoría de notas | `lms.grading` | `grade.changed`, `grade.posted` (bus + SNS FIFO) | `assignment.published`, `enrollment.*`, `submission.graded` | EVA-02, DAT-01 |
+| **ms-notificaciones** | Notificaciones | — | — | `user.provisioned`, `course.published`, `enrollment.*`, `announcement.published`, `module.published`, `assignment.published`, `submission.submitted`, `grade.posted` | ENG-01 |
 
-Nadie hace solo backend o solo frontend: todos tocan las dos partes y todos tienen eventos.
+Los **16 eventos** del MVP siguen el formato `lms.<contexto>.<entidad>.<hecho>.v1` (por ejemplo `lms.content.file.scanned.v1`). Sus esquemas JSON, un ejemplo de cada uno y los contratos OpenAPI de los 6 microservicios están en [`nubeduca-contratos`](https://github.com/nubeduca/nubeduca-contratos). **Ningún microservicio publica un evento ni expone una ruta que no esté ahí.**
 
 ---
 
-## 👥 Roles — elige el tuyo
+## 📦 Repositorios
 
-| Rol | Módulo | Tarea transversal | Elegido por |
+| Repo | Contenido | Dueño | Estado |
 |---|---|---|---|
-| **1** | Usuarios y acceso | Base del frontend (layout, login, rutas) + despliegue en **Amplify** | |
-| **2** | Cursos e inscripciones | Compilar el **informe** final | Brando |
-| **3** | Contenidos (S3) | **Diagrama de arquitectura** | Alexander León |
-| **4** | Evaluaciones y entregas | Compilar el **PowerPoint** final | |
-| **5** | Calificaciones y seguimiento | **Despliegue final** de todo el backend en una sola cuenta AWS + colección Postman unificada | |
-| **6** | Notificaciones | **Guion de la demo** con 2 tenants + video de respaldo | |
-
-### Rol 1 — Usuarios y acceso · `nubeduca-ms-usuarios`
-
-**Backend**
-- [ ] Repo `nubeduca-ms-usuarios` y su `serverless.yml`.
-- [ ] Tablas DynamoDB `t_usuarios` y `t_tokens_acceso`.
-- [ ] Lambdas **registro** (estudiante, docente o admin, con contraseña encriptada) y **login** (genera el token con expiración).
-- [ ] Lambda **validar token** (devuelve tenant, email y rol) y archivo `validar_token.py` para que lo usen los demás.
-- [ ] Lambdas **perfil** y **listar usuarios**.
-
-**Eventos**
-- [ ] Publicar el evento SNS **usuario-registrado** (lo usa el rol 6 para el email de bienvenida).
-
-**Frontend**
-- [ ] Pantallas de **login** y **registro** con selección de institución (tenant), **perfil** y **administración de usuarios**.
-
-**Datos y documentación**
-- [ ] Script con 30,000 usuarios ficticios, estructura JSON, README, colección Postman, sección del informe y diapositivas.
-
-**Transversal**
-- [ ] **Base del frontend:** crear el repo `nubeduca-frontend`, el layout con menú, las rutas, el manejo del token y el cliente de API que usan todos. Desplegarlo en **AWS Amplify**.
-
-### Rol 2 — Cursos e inscripciones · `nubeduca-ms-cursos`
-
-**Backend**
-- [ ] Repo `nubeduca-ms-cursos` y su `serverless.yml`.
-- [ ] Tablas DynamoDB `t_cursos` y `t_inscripciones`.
-- [ ] Lambdas **crear, listar, buscar, modificar y eliminar** cursos (solo el docente crea, modifica y elimina).
-- [ ] Lambdas **inscribir**, **mis cursos** e **inscritos** de un curso.
-- [ ] Proteger las Lambdas con el token.
-
-**Eventos**
-- [ ] Publicar el evento SNS **estudiante-inscrito** (lo usa el rol 6 para saber a quién avisar).
-
-**Frontend**
-- [ ] Pantallas de **catálogo de cursos**, **crear/editar curso** (docente), **inscribirse** y **mis cursos**, y lista de **inscritos**.
-
-**Datos y documentación**
-- [ ] Script con 30,000 cursos ficticios, estructura JSON, README, colección Postman, sección del informe y diapositivas.
-
-**Transversal**
-- [ ] **Informe:** preparar la plantilla, recibir las secciones de todos y compilar el documento final.
-
-### Rol 3 — Contenidos · `nubeduca-ms-contenidos`
-
-**Backend**
-- [ ] Repo `nubeduca-ms-contenidos` y su `serverless.yml`.
-- [ ] Bucket **S3** de materiales y tabla DynamoDB `t_contenidos`.
-- [ ] Lambda **subir material** (devuelve una URL prefirmada de S3; solo docente).
-- [ ] Lambdas para registrar **enlaces** (videos o links), **listar**, **descargar** (URL prefirmada) y **eliminar**.
-- [ ] Proteger las Lambdas con el token.
-
-**Eventos**
-- [ ] Lambda disparada por el **evento de S3**: marca el material como publicado y envía el evento SNS **material-publicado** (lo usa el rol 6).
-
-**Frontend**
-- [ ] Pantallas de **materiales del curso por semana**, **subir material** (docente) y **descargar/ver** material.
-
-**Datos y documentación**
-- [ ] Script con 30,000 contenidos ficticios, estructura JSON, README, colección Postman, sección del informe y diapositivas.
-
-**Transversal**
-- [ ] **Diagrama de arquitectura** de toda la solución (draw.io con íconos AWS).
-
-### Rol 4 — Evaluaciones y entregas · `nubeduca-ms-evaluaciones`
-
-**Backend**
-- [ ] Repo `nubeduca-ms-evaluaciones` y su `serverless.yml`.
-- [ ] Tablas DynamoDB `t_evaluaciones` y `t_entregas`.
-- [ ] Lambdas **crear, listar, buscar, modificar y eliminar** evaluaciones (quizzes y tareas; solo el docente crea, modifica y elimina).
-- [ ] Ocultar las respuestas correctas cuando consulta un estudiante.
-- [ ] Lambdas **entregar** (estudiante, valida fecha límite) y **ver entregas** (docente).
-- [ ] Proteger las Lambdas con el token.
-
-**Eventos**
-- [ ] Publicar el evento SNS **entrega-enviada** al recibir una entrega (lo usa el rol 5 para calificar).
-
-**Frontend**
-- [ ] Pantallas de **crear evaluación** (docente, con preguntas), **rendir quiz** y **entregar tarea** (estudiante), y **ver entregas** (docente).
-
-**Datos y documentación**
-- [ ] Script con 30,000 evaluaciones ficticias, estructura JSON, README, colección Postman, sección del informe y diapositivas.
-
-**Transversal**
-- [ ] **PowerPoint:** preparar la plantilla, recibir las diapositivas de todos y compilar la presentación final.
-
-### Rol 5 — Calificaciones y seguimiento · `nubeduca-ms-calificaciones`
-
-**Backend**
-- [ ] Repo `nubeduca-ms-calificaciones` y su `serverless.yml`.
-- [ ] Tabla DynamoDB `t_calificaciones`.
-- [ ] Lambda **calificar** tareas manualmente (docente).
-- [ ] Lambdas **mis notas** y **progreso** del estudiante, y **reporte del curso** para el docente (promedio, aprobados, desaprobados).
-- [ ] Proteger las Lambdas con el token.
-
-**Eventos**
-- [ ] Lambda que escucha (SQS) **entrega-enviada** y califica los quizzes automáticamente.
-- [ ] Publicar el evento SNS **nota-publicada** (lo usa el rol 6 para avisar al estudiante).
-
-**Frontend**
-- [ ] Pantallas de **mis notas** y **progreso** (estudiante), **calificar tareas** y **reporte del curso** (docente).
-
-**Datos y documentación**
-- [ ] Script con 30,000 calificaciones ficticias, estructura JSON, README, colección Postman, sección del informe y diapositivas.
-
-**Transversal**
-- [ ] **Despliegue final** de los 6 microservicios en una sola cuenta AWS y **colección Postman unificada** del proyecto.
-
-### Rol 6 — Notificaciones · `nubeduca-ms-notificaciones`
-
-**Backend**
-- [ ] Repo `nubeduca-ms-notificaciones` y su `serverless.yml`.
-- [ ] Tablas DynamoDB `t_notificaciones` y `t_destinatarios` (copia de los inscritos por curso, armada a partir de los eventos).
-- [ ] Lambdas **mis notificaciones** y **marcar como leída**.
-- [ ] Topic SNS **notificaciones** con suscripción por email.
-- [ ] Proteger las Lambdas con el token.
-
-**Eventos**
-- [ ] Lambdas que escuchan (SQS) los eventos **usuario-registrado** (email de bienvenida), **estudiante-inscrito** (guarda al destinatario), **material-publicado** (avisa a los inscritos del curso) y **nota-publicada** (avisa al estudiante).
-
-**Frontend**
-- [ ] **Campana / bandeja de notificaciones** en el menú, con contador de no leídas.
-
-**Datos y documentación**
-- [ ] Script con 30,000 notificaciones ficticias, estructura JSON, README, colección Postman, sección del informe y diapositivas.
-
-**Transversal**
-- [ ] **Guion de la demo** con 2 tenants (quién presenta cada parte) y **video de respaldo**.
+| [`.github`](https://github.com/nubeduca/.github) | Este README y el diagrama de arquitectura | Dev 5 | 🟢 Activo |
+| [`nubeduca-backlog`](https://github.com/nubeduca/nubeduca-backlog/issues) | Las 33 tareas como issues: fase, ola, dependencias y responsable | Dev 3 | 🟢 Activo |
+| [`nubeduca-contratos`](https://github.com/nubeduca/nubeduca-contratos) | Catálogo de 16 eventos, JSON Schema, OpenAPI de los 6 microservicios y validación en CI | Dev 3 | 🟢 v1 publicada (ARQ-01) |
+| [`nubeduca-infra`](https://github.com/nubeduca/nubeduca-infra) | Entorno local con LocalStack. Luego: stacks `base/`, `bus/` y `auth/` | Dev 1, 2 y 4 | 🟡 LocalStack listo |
+| [`nubeduca-frontend`](https://github.com/nubeduca/nubeduca-frontend) | React + TypeScript + Vite, publicado en Amplify | Dev 6 | 🟡 Shell listo (FE-01) |
+| `nubeduca-ms-usuarios` | Tenant, periodos, usuarios y perfiles | Dev 3 y 4 | ⚪ Por crear |
+| [`nubeduca-ms-cursos`](https://github.com/nubeduca/nubeduca-ms-cursos) | Cursos, secciones, matrícula CSV y anuncios | Dev 3 y 4 | ⚪ Solo README |
+| `nubeduca-ms-contenidos` | Archivos en S3 con antivirus, módulos e ítems | Dev 5 | ⚪ Por crear |
+| [`nubeduca-ms-evaluaciones`](https://github.com/nubeduca/nubeduca-ms-evaluaciones) | Tareas y entregas | Dev 4 | ⚪ Solo README |
+| [`nubeduca-ms-calificaciones`](https://github.com/nubeduca/nubeduca-ms-calificaciones) | Libro de notas, publicación por SNS FIFO y auditoría | Dev 4, 3 y 5 | 🟠 Base previa, falta alinearla a los contratos |
+| `nubeduca-ms-notificaciones` | Consumidores SQS y email por SNS | Dev 6 | ⚪ Por crear |
 
 ---
 
-## 🎯 Primera presentación con el asesor (avance del 30%)
+## 👥 Equipo y responsabilidades
 
-La rúbrica le da **3 puntos** a esta exposición virtual y pide un **avance proporcional al 30%**. Cada uno muestra lo suyo; así todos suman al avance.
+Las asignaciones son las de la **arquitectura de solución** (sección 9). Con 6 devs, cada persona cubre un dominio o una capa; los squads se forman cuando el equipo crezca. Las tareas viven como **issues** en [`nubeduca-backlog`](https://github.com/nubeduca/nubeduca-backlog/issues): cada issue indica su fase, su ola, de qué depende y cuándo está listo.
 
-**Lo que debe verse como grupo**
-- [ ] Idea del SaaS (LMS multi-tenant) y los 6 módulos.
-- [ ] **Diagrama de arquitectura v1** (rol 3).
-- [ ] Los **6 microservicios desplegados** con Serverless Framework, cada uno con su CRUD principal funcionando en Postman.
-- [ ] Las **6 tablas con 30,000 registros** repartidos en UTEC, UPC y PUCP.
-- [ ] **Frontend base publicado en Amplify** con login (rol 1).
-- [ ] **Diapositivas del avance** (rol 4 las junta; cada uno aporta 1).
-
-**Lo que muestra cada uno**
-
-| Rol | Avance para la presentación |
-|---|---|
-| **1** | Registro, login y validar token funcionando en Postman · tabla con 30k usuarios · frontend base en Amplify con la pantalla de login |
-| **2** | CRUD de cursos e inscripción en Postman · tabla con 30k cursos · pantalla de catálogo de cursos |
-| **3** | Subir un material con URL prefirmada y ver el evento de S3 · tabla con 30k contenidos · **diagrama de arquitectura v1** |
-| **4** | Crear y listar evaluaciones (sin respuestas para el estudiante) en Postman · tabla con 30k evaluaciones · **diapositivas del avance** |
-| **5** | Calificar una tarea y ver el reporte del curso en Postman · tabla con 30k calificaciones · pantalla de mis notas |
-| **6** | Recibir un evento simulado (`aws sns publish`) y que llegue el email · tabla con 30k notificaciones · bandeja de notificaciones |
-
-Cada uno presenta su módulo en **1–2 minutos**: qué hace, su estructura JSON y una prueba en vivo o en captura.
-
-**Lo que queda para después del avance (el 70% restante):** proteger todas las APIs con el token, conectar los eventos entre módulos, completar las pantallas del frontend, el despliegue final en una sola cuenta, el informe, el PowerPoint final y la demo con 2 tenants.
-
----
-
-> 📘 **Antes de empezar, lee [Contratos y dependencias](https://github.com/nubeduca/.github/blob/main/docs/CONTRATOS-Y-DEPENDENCIAS.md):** nombres, claves, formatos de eventos, `validar_token.py` y qué necesita cada rol para avanzar sin esperar a nadie.
-
-## ⚡ Eventos entre módulos
-
-| Evento (SNS → SQS) | Lo publica | Lo consume |
+| Dev | Integrante | Área principal |
 |---|---|---|
-| `usuario-registrado` | Rol 1 | Rol 6 |
-| `estudiante-inscrito` | Rol 2 | Rol 6 |
-| `material-publicado` | Rol 3 (desde el evento de S3) | Rol 6 |
-| `entrega-enviada` | Rol 4 | Rol 5 |
-| `nota-publicada` | Rol 5 | Rol 6 |
+| **1** | Fabricio · [@cruz-eng](https://github.com/cruz-eng) | Plataforma AWS: stages, stack base, API Gateway, despliegue continuo, staging y producción |
+| **2** | Mariano · [@MarianoUtec](https://github.com/MarianoUtec) | Monorepo y CI, bus de eventos, Cognito (AUTH-01) e informe final |
+| **3** | Benjamin · [@btoroled](https://github.com/btoroled) | Arquitectura y contratos; dominio académico: tenant, cursos, matrícula y anuncios |
+| **4** | Brando · [@Edinson695](https://github.com/Edinson695) | Entorno local (LocalStack), usuarios, tareas y entregas, calificaciones |
+| **5** | Alexander · [@AIexander-lx](https://github.com/AIexander-lx) | Diagrama de arquitectura, plantilla de servicio, contenidos (S3 y módulos) y auditoría de notas |
+| **6** | Guillermo · [@Guillermo-Heredia](https://github.com/Guillermo-Heredia) | Frontend en Amplify, notificaciones por email, PowerPoint y video de la demo |
 
-Mientras un módulo no esté listo, quien consume su evento lo puede **simular** con `aws sns publish` y el JSON acordado, así nadie espera a nadie.
+### Tareas de cada integrante
+
+| Dev | Fase 0 · Fundaciones | Fase 1 · MVP académico |
+|---|---|---|
+| **1 · Fabricio** | [PLT-01](https://github.com/nubeduca/nubeduca-backlog/issues/4) Cuenta AWS y stages · [PLT-03](https://github.com/nubeduca/nubeduca-backlog/issues/8) Stack base · [PLT-05](https://github.com/nubeduca/nubeduca-backlog/issues/15) API Gateway y borde · [PLT-06](https://github.com/nubeduca/nubeduca-backlog/issues/18) CD y alarmas · [GATE-0](https://github.com/nubeduca/nubeduca-backlog/issues/22) *(con Dev 2)* | [REL-01](https://github.com/nubeduca/nubeduca-backlog/issues/28) MVP en staging *(con Dev 2)* · [REL-02](https://github.com/nubeduca/nubeduca-backlog/issues/33) Producción y piloto *(con Dev 3)* · opcionales: [PERF-01](https://github.com/nubeduca/nubeduca-backlog/issues/26), [PERF-02](https://github.com/nubeduca/nubeduca-backlog/issues/30) |
+| **2 · Mariano** | [PLT-02](https://github.com/nubeduca/nubeduca-backlog/issues/5) Monorepo y CI · [PLT-04](https://github.com/nubeduca/nubeduca-backlog/issues/14) Bus de eventos · [AUTH-01](https://github.com/nubeduca/nubeduca-backlog/issues/17) Cognito y tenant en el token · [GATE-0](https://github.com/nubeduca/nubeduca-backlog/issues/22) *(con Dev 1)* | [REL-01](https://github.com/nubeduca/nubeduca-backlog/issues/28) *(con Dev 1)* · [DOC-02](https://github.com/nubeduca/nubeduca-backlog/issues/29) **Informe final** · opcionales: [PERF-01](https://github.com/nubeduca/nubeduca-backlog/issues/26), [PERF-02](https://github.com/nubeduca/nubeduca-backlog/issues/30) |
+| **3 · Benjamin** | [ARQ-01](https://github.com/nubeduca/nubeduca-backlog/issues/1) Catálogo de eventos · [LIB-01](https://github.com/nubeduca/nubeduca-backlog/issues/7) Plantilla de servicio *(con Dev 5)* | [ACA-01](https://github.com/nubeduca/nubeduca-backlog/issues/9) Tenant y organización · [ACA-03](https://github.com/nubeduca/nubeduca-backlog/issues/16) Cursos *(con Dev 4)* · [ACA-04](https://github.com/nubeduca/nubeduca-backlog/issues/19) Matrícula CSV · [COL-01](https://github.com/nubeduca/nubeduca-backlog/issues/23) Anuncios · [EVA-02](https://github.com/nubeduca/nubeduca-backlog/issues/27) Calificaciones *(con Dev 4)* · [REL-02](https://github.com/nubeduca/nubeduca-backlog/issues/33) *(con Dev 1)* |
+| **4 · Brando** | [LOC-01](https://github.com/nubeduca/nubeduca-backlog/issues/3) Entorno local con LocalStack | [ACA-02](https://github.com/nubeduca/nubeduca-backlog/issues/10) Usuarios y perfiles · [ACA-03](https://github.com/nubeduca/nubeduca-backlog/issues/16) Cursos *(con Dev 3)* · [EVA-01](https://github.com/nubeduca/nubeduca-backlog/issues/24) Tareas y entregas · [EVA-02](https://github.com/nubeduca/nubeduca-backlog/issues/27) Calificaciones *(con Dev 3)* |
+| **5 · Alexander** | [DOC-01](https://github.com/nubeduca/nubeduca-backlog/issues/6) **Diagrama de arquitectura** · [LIB-01](https://github.com/nubeduca/nubeduca-backlog/issues/7) Plantilla de servicio *(con Dev 3)* | [CON-01](https://github.com/nubeduca/nubeduca-backlog/issues/11) Archivos y media · [DAT-01](https://github.com/nubeduca/nubeduca-backlog/issues/12) Auditoría de notas · [CON-02](https://github.com/nubeduca/nubeduca-backlog/issues/20) Contenido y módulos |
+| **6 · Guillermo** | [FE-01](https://github.com/nubeduca/nubeduca-backlog/issues/2) Shell web en Amplify | [ENG-01](https://github.com/nubeduca/nubeduca-backlog/issues/13) Notificaciones por email · [FE-02](https://github.com/nubeduca/nubeduca-backlog/issues/21) UI académica · [FE-03](https://github.com/nubeduca/nubeduca-backlog/issues/25) UI de tareas y notas · [DOC-03](https://github.com/nubeduca/nubeduca-backlog/issues/32) **PowerPoint, guion y video** |
+| **Todos** | — | [QA-01](https://github.com/nubeduca/nubeduca-backlog/issues/31) E2E del curso piloto con 2 tenants |
+
+**Ruta crítica:** ARQ-01 → LIB-01 → Tenant → Cursos → Matrícula → Tareas → Notas → staging → producción. Si una de estas tareas se atrasa, se suma un segundo dev en vez de apurar el resto.
+
+**La Ola 3 es la más cargada** (7 tareas para 6 personas): Dev 5 toma DAT-01 después de CON-01. La Fase 1 no espera a GATE-0: arranca en la Ola 3, apenas está la plantilla de servicio.
 
 ---
 
-## 📐 Reglas comunes (para todos)
+## 📍 Estado actual
 
+| Tarea | Responsable | Estado | Dónde |
+|---|---|---|---|
+| ARQ-01 Catálogo de eventos y OpenAPI | Dev 3 | 🟡 Publicado, falta la revisión de los 6 devs | [`nubeduca-contratos`](https://github.com/nubeduca/nubeduca-contratos) |
+| LOC-01 Entorno local con LocalStack | Dev 4 | 🟢 Listo | [`nubeduca-infra/localstack`](https://github.com/nubeduca/nubeduca-infra/tree/main/localstack) |
+| FE-01 Shell web | Dev 6 | 🟡 Shell listo, falta publicarlo en Amplify | [`nubeduca-frontend`](https://github.com/nubeduca/nubeduca-frontend) |
+| DOC-01 Diagrama de arquitectura | Dev 5 | 🟢 Diagrama v1 subido a este repo | este repo |
+| PLT-01, PLT-02, PLT-03, LIB-01 | Dev 1, 2, 3 y 5 | ⚪ Por empezar | — |
+
+**Revisión de ARQ-01:** cada dev revisa lo suyo en el PR de `nubeduca-contratos` (la lista está en su README). Cuando los 6 aprueben, ARQ-01 queda cerrada y LIB-01 puede arrancar.
+
+**Avances previos que se reutilizan:** `nubeduca-ms-calificaciones` ya tiene una base (`serverless.yml` y tabla) que hizo Mariano. Cuando esté la plantilla de LIB-01, se alinea a los contratos v1 (token de Cognito, camelCase y outbox) para EVA-02 y DAT-01.
+
+---
+
+## 🎯 Avance del 30% · sábado 14 de noviembre
+
+La rúbrica le da **3 puntos** a la exposición virtual con el asesor y pide un **avance proporcional al 30%**.
+
+**Propuesta (por confirmar con el grupo):** las **olas 1 y 2 completas** más **PLT-04 y PLT-05**, es decir 10 de las 33 tareas.
+
+| Ola | Tareas |
+|---|---|
+| 1 | ARQ-01 Catálogo · LOC-01 LocalStack · PLT-01 Cuenta y stages · PLT-02 Monorepo y CI · FE-01 Shell en Amplify |
+| 2 | DOC-01 Diagrama · LIB-01 Plantilla de servicio · PLT-03 Stack base |
+| 3 | PLT-04 Bus de eventos · PLT-05 API Gateway y borde |
+
+**Lo que vería el asesor:**
+- Diagrama de arquitectura
+- Catálogo de eventos y contratos OpenAPI
+- Frontend publicado en Amplify con login simulado
+- Un endpoint que responde desde Amplify por API Gateway → Lambda
+- La plantilla con un servicio de ejemplo que publica y consume un evento (en local con LocalStack)
+
+---
+
+## 🚀 Despliegue e IaC
+
+Toda la infraestructura se declara con **Serverless Framework v4**: un `serverless.yml` por stack y un `serverless-compose.yml` que despliega en paralelo lo independiente y en orden lo que depende de otro (**base → bus → auth → microservicios**).
+
+| Stack | Qué crea | Repo |
+|---|---|---|
+| `infra/base` | Bucket de despliegue y parámetros SSM compartidos | `nubeduca-infra` |
+| `infra/bus` | Bus `lms` de EventBridge, Schema Registry, Archive y SNS FIFO de notas | `nubeduca-infra` |
+| `infra/auth` | User pool de Cognito con `tenant_id` y rol en el token | `nubeduca-infra` |
+| Cada microservicio | API Gateway + Lambdas + tabla DynamoDB + sus reglas, colas SQS y DLQ de consumidor | `nubeduca-ms-*` |
+| Frontend | Amplify Hosting publica cada merge a `main` | `nubeduca-frontend` |
+
+| Tema | Decisión |
+|---|---|
+| Entornos | `dev`, `staging` y `prod` como stages de Serverless en el Learner Lab |
+| Conexión entre stacks | Por outputs de CloudFormation leídos con `${servicio.Output}` en Compose; nadie copia ARNs a mano |
+| Consumidores | Cada servicio declara en su propio stack la regla de EventBridge, su cola y su DLQ; el bus solo se crea en `infra/bus` |
+| Pipeline | En cada PR: lint, tests, compatibilidad de esquemas y tests de contrato → `serverless deploy --stage dev`. Merge a `main` → `staging`. Producción con aprobación manual |
+| CI | GitHub Actions con `SERVERLESS_LICENSE_KEY` como secreto |
+| Eventos nuevos | Orden de despliegue: esquema en el registry → regla y cola del consumidor → productor |
+| Liberación | Feature flags por tenant para abrir funciones solo al curso piloto |
+
+> PLT-02 define si el código se junta en un monorepo (como propone la arquitectura, con `infra/`, `services/` y `web/`) o se mantiene un repo por microservicio, como está hoy.
+
+---
+
+## 📐 Reglas de trabajo
+
+- **Un servicio, un equipo dueño; un tipo de evento, un solo productor.**
+- Suscribirse a un evento no requiere pedir permiso: el contrato vive en el registry y el productor no puede romperlo.
+- **Event storming por dominio** antes de cada fase del roadmap.
+- **Toda decisión estructural queda como ADR** en el repositorio. Un PR que rompa uno de los principios de arquitectura necesita un ADR.
+- **Definition of Done:** eventos documentados en AsyncAPI, test de contrato en CI, dashboard, alertas y runbook.
 - Repos **públicos** dentro de la organización `nubeduca`.
-- **Python 3.13** + **Serverless Framework** (`sls deploy`).
-- Rol IAM: `arn:aws:iam::${aws:accountId}:role/LabRole`.
+- Cada tarea se trabaja desde su **issue**. El PR menciona el ID de la tarea (por ejemplo `CON-01`).
+- **Ningún PR se mergea sin la revisión de otro dev.** Los contratos de eventos y la plantilla de servicio los aprueba Dev 3.
+- **Python 3.13** + **Serverless Framework v4** con los stages `dev`, `staging` y `prod`.
+- Rol IAM: `arn:aws:iam::${aws:accountId}:role/LabRole`. En el Learner Lab no se pueden crear roles.
 - Tablas: `${sls:stage}-t_<nombre>`, con **`tenant_id` en la clave de partición**.
-- Tenants: `UTEC`, `UPC`, `PUCP` · Roles de usuario: `STUDENT`, `TEACHER`, `ADMIN`.
-- Todas las APIs (menos registro y login) se **protegen con el token** del rol 1, y el `tenant_id` se toma **del token**.
-- Logs en formato estándar: `{"tipo": "INFO" | "ERROR", "log_datos": {...}}`.
-- Cada repo incluye: `serverless.yml`, Lambdas, `poblar_datos.py` (30,000 registros), colección de Postman y README con la estructura JSON de sus tablas.
-- En el frontend, cada uno trabaja en su propia carpeta de pantallas (`src/modulos/<su-modulo>`) para no pisarse.
-- Cada uno envía su sección del informe al rol 2 y sus diapositivas al rol 4.
+- Tenants: `utec`, `upc`, `pucp` · Roles: `STUDENT`, `TEACHER`, `ADMIN`.
+- `tenant_id` y rol salen del **token de Cognito** (`custom:tenant_id`, `custom:role`), nunca de la ruta ni del body.
+- Ids, rutas y campos en **inglés y camelCase**; textos para el usuario en español.
+- Los eventos llevan **payload mínimo** (ids y lo que cambió), nada de nombres ni correos. Un archivo viaja como `fileId`.
+- `poblar_datos.py` **no** escribe ítems `EVENTO#`, para no inundar el bus al cargar los 30.000 registros.
+- Antes de desplegar en AWS, se prueba en local con [LocalStack](https://github.com/nubeduca/nubeduca-infra/tree/main/localstack).
+- Cada microservicio incluye: `serverless.yml`, Lambdas, `poblar_datos.py` (30.000 registros, 10.000 por tenant), colección de Postman y README con la estructura JSON de sus tablas.
+
+---
+
+## 🗺️ Roadmap
+
+Para el curso se entregan la **Fase 0** y la **Fase 1**. La prueba de estrés es un adicional y las Fases 2 a 4 quedan como roadmap.
+
+| Fase | Contenido | Gate |
+|---|---|---|
+| **0 · Fundaciones** | Learner Lab, EventBridge + Schema Registry, SQS con DLQ, CI/CD, CloudWatch + X-Ray, Cognito, API Gateway, plantilla de servicio | Un servicio publica por outbox, otro consume de forma idempotente y la traza se ve de punta a punta |
+| **1 · MVP académico** | Tenant, usuarios, cursos, matrícula CSV, contenido y módulos, archivos, tareas y entregas, calificaciones, anuncios, notificaciones y auditoría de notas | Contenido → tarea → entrega → nota → aviso, con 2 tenants |
+| 2 · Evaluación y colaboración | Quizzes (QTI), rúbricas, LTI 1.3, calendario, foros, mensajería, app móvil | — |
+| 3 · Engagement y analítica | Progreso, certificados, LRS (xAPI), reportes, búsqueda | — |
+| 4 · Ecosistema | SCORM / cmi5, Common Cartridge, webhooks públicos, pagos | — |
