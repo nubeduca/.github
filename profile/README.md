@@ -47,15 +47,15 @@ La rúbrica manda: si el diseño choca con ella, gana la rúbrica.
 
 ![Arquitectura de Nubeduca](https://raw.githubusercontent.com/nubeduca/.github/main/nubeduca-arquitectura.drawio.png)
 
-*Diagrama editable: [`nubeduca-arquitectura.drawio`](https://github.com/nubeduca/.github/blob/main/nubeduca-arquitectura.drawio)*
+*Diagrama de Dev 3 (versión con los cambios de PLT-04). Editable: [`nubeduca-arquitectura.drawio`](https://github.com/nubeduca/.github/blob/main/nubeduca-arquitectura.drawio)*
 
 ### Cómo fluye una petición
 
 1. El navegador carga el frontend desde **AWS Amplify Hosting**.
 2. El usuario inicia sesión en **Amazon Cognito**. El token trae `tenant_id` y rol.
 3. Cada llamada va a la **API Gateway** del microservicio dueño. El authorizer de Cognito valida el token, y la Lambda toma `tenant_id` del token, nunca del body.
-4. La **Lambda** escribe en la tabla **DynamoDB** de su microservicio y, en la misma transacción, el evento (registro `EVENTO#`). Ningún microservicio lee la tabla de otro. Los archivos suben directo a **S3** con URL prefirmada.
-5. **DynamoDB Streams** y **EventBridge Pipes** llevan cada evento al bus **`lms`**. **Schema Registry** guarda los contratos y **Archive** permite reprocesar.
+4. La **Lambda** escribe el cambio en la tabla **DynamoDB** de su microservicio y, en la misma transacción, el evento (registro `EVENTO#`) **validado contra su esquema**. Ningún microservicio lee la tabla de otro. Los archivos suben directo a **S3** con URL prefirmada.
+5. **DynamoDB Streams** y **EventBridge Pipes** llevan cada evento al bus **`lms`** (en AWS se despliega uno por stage: `lms-dev`, `lms-staging`, `lms-prod`). **Archive** permite reprocesar. Los esquemas viven en el repo [`nubeduca-contratos`](https://github.com/nubeduca/nubeduca-contratos), que la CI valida (el Schema Registry no está disponible en el Learner Lab).
 6. Una **regla** por consumidor copia el evento a su cola **SQS** con **DLQ**. La Lambda consumidora lo procesa una sola vez (idempotente).
 7. ms-calificaciones publica además las notas en **SNS FIFO** con grupo `tenant_id:course_id`, y llegan en orden a la cola **SQS FIFO** de ms-notificaciones.
 8. ms-notificaciones avisa por **email** con Amazon SNS, según las preferencias del usuario.
@@ -111,14 +111,15 @@ Los **16 eventos** del MVP siguen el formato `lms.<contexto>.<entidad>.<hecho>.v
 | [`.github`](https://github.com/nubeduca/.github) | Este README y el diagrama de arquitectura | Dev 5 | 🟢 Activo |
 | [`nubeduca-backlog`](https://github.com/nubeduca/nubeduca-backlog/issues) | Las 33 tareas como issues: fase, ola, dependencias y responsable | Dev 3 | 🟢 Activo |
 | [`nubeduca-contratos`](https://github.com/nubeduca/nubeduca-contratos) | Catálogo de 16 eventos, JSON Schema, OpenAPI de los 6 microservicios y validación en CI | Dev 3 | 🟢 v1 publicada (ARQ-01) |
-| [`nubeduca-infra`](https://github.com/nubeduca/nubeduca-infra) | Entorno local con LocalStack. Luego: stacks `base/`, `bus/` y `auth/` | Dev 1, 2 y 4 | 🟡 LocalStack listo |
-| [`nubeduca-frontend`](https://github.com/nubeduca/nubeduca-frontend) | React + TypeScript + Vite, publicado en Amplify | Dev 6 | 🟡 Shell listo (FE-01) |
+| [`nubeduca-infra`](https://github.com/nubeduca/nubeduca-infra) | LocalStack, guía del Learner Lab y stacks compartidos: `infra/base` (PLT-03), `bus/` (PLT-04). Luego `auth/` (AUTH-01) | Dev 1, 2 y 4 | 🟡 LocalStack y guía AWS en `main`; PLT-03 en PR #3, PLT-04 en rama `plt-04-bus` |
+| [`nubeduca-frontend`](https://github.com/nubeduca/nubeduca-frontend) | React + TypeScript + Vite, publicado en [Amplify](https://main.d122p0gongncde.amplifyapp.com/) | Dev 6 | 🟢 FE-01 publicado; FE-02 (PR #1) y FE-03 (PR #2) en revisión |
+| [`nubeduca-plantilla-servicio`](https://github.com/nubeduca/nubeduca-plantilla-servicio) | Plantilla que copia cada microservicio: outbox, inbox idempotente, `serverless.yml` base y ejemplo | Dev 3 y 5 | 🟢 LIB-01 probado en LocalStack, espera aprobación de Dev 3 |
 | `nubeduca-ms-usuarios` | Tenant, periodos, usuarios y perfiles | Dev 3 y 4 | ⚪ Por crear |
 | [`nubeduca-ms-cursos`](https://github.com/nubeduca/nubeduca-ms-cursos) | Cursos, secciones, matrícula CSV y anuncios | Dev 3 y 4 | ⚪ Solo README |
 | `nubeduca-ms-contenidos` | Archivos en S3 con antivirus, módulos e ítems | Dev 5 | ⚪ Por crear |
 | [`nubeduca-ms-evaluaciones`](https://github.com/nubeduca/nubeduca-ms-evaluaciones) | Tareas y entregas | Dev 4 | ⚪ Solo README |
 | [`nubeduca-ms-calificaciones`](https://github.com/nubeduca/nubeduca-ms-calificaciones) | Libro de notas, publicación por SNS FIFO y auditoría | Dev 4, 3 y 5 | 🟠 Base previa, falta alinearla a los contratos |
-| `nubeduca-ms-notificaciones` | Consumidores SQS y email por SNS | Dev 6 | ⚪ Por crear |
+| [`nubeduca-ms-notificaciones`](https://github.com/nubeduca/nubeduca-ms-notificaciones) | Consumidores SQS y email por SNS | Dev 6 | 🟢 ENG-01 desplegado en `dev` y probado en AWS |
 
 ---
 
@@ -157,13 +158,20 @@ Las asignaciones son las de la **arquitectura de solución** (sección 9). Con 6
 
 | Tarea | Responsable | Estado | Dónde |
 |---|---|---|---|
-| ARQ-01 Catálogo de eventos y OpenAPI | Dev 3 | 🟡 Publicado, falta la revisión de los 6 devs | [`nubeduca-contratos`](https://github.com/nubeduca/nubeduca-contratos) |
-| LOC-01 Entorno local con LocalStack | Dev 4 | 🟢 Listo | [`nubeduca-infra/localstack`](https://github.com/nubeduca/nubeduca-infra/tree/main/localstack) |
-| FE-01 Shell web | Dev 6 | 🟡 Shell listo, falta publicarlo en Amplify | [`nubeduca-frontend`](https://github.com/nubeduca/nubeduca-frontend) |
-| DOC-01 Diagrama de arquitectura | Dev 5 | 🟢 Diagrama v1 subido a este repo | este repo |
-| PLT-01, PLT-02, PLT-03, LIB-01 | Dev 1, 2, 3 y 5 | ⚪ Por empezar | — |
+| [ARQ-01](https://github.com/nubeduca/nubeduca-backlog/issues/1) Catálogo de eventos y OpenAPI | Dev 3 | 🟢 Cerrado | [`nubeduca-contratos`](https://github.com/nubeduca/nubeduca-contratos) |
+| [FE-01](https://github.com/nubeduca/nubeduca-backlog/issues/2) Shell web | Dev 6 | 🟢 Cerrado, publicado en Amplify | [`nubeduca-frontend`](https://github.com/nubeduca/nubeduca-frontend) |
+| [LOC-01](https://github.com/nubeduca/nubeduca-backlog/issues/3) Entorno local con LocalStack | Dev 4 | 🟢 Cerrado | [`nubeduca-infra/localstack`](https://github.com/nubeduca/nubeduca-infra/tree/main/localstack) |
+| [PLT-01](https://github.com/nubeduca/nubeduca-backlog/issues/4) Cuenta AWS y stages | Dev 1 | 🟢 Cerrado: guía del Learner Lab | [`aws-learner-lab.md`](https://github.com/nubeduca/nubeduca-infra/blob/main/aws-learner-lab.md) |
+| [PLT-02](https://github.com/nubeduca/nubeduca-backlog/issues/5) Monorepo y CI | Dev 2 | ⚪ Por empezar | — |
+| [DOC-01](https://github.com/nubeduca/nubeduca-backlog/issues/6) Diagrama de arquitectura | Dev 5 | 🟢 Cerrado | este repo |
+| [LIB-01](https://github.com/nubeduca/nubeduca-backlog/issues/7) Plantilla de servicio | Dev 3 y 5 | 🟡 Probado en LocalStack y desplegado en AWS; valida cada evento contra su esquema. Espera aprobación de Dev 3 | [`nubeduca-plantilla-servicio`](https://github.com/nubeduca/nubeduca-plantilla-servicio) |
+| [PLT-03](https://github.com/nubeduca/nubeduca-backlog/issues/8) Stack base | Dev 1 | 🟡 PR abierto, falta revisión y merge | [PR #3](https://github.com/nubeduca/nubeduca-infra/pull/3) |
+| [PLT-04](https://github.com/nubeduca/nubeduca-backlog/issues/14) Bus de eventos | Dev 2 | 🟡 Bus `lms-dev`, Archive y SNS FIFO desplegados en AWS; Schema Registry bloqueado por el LabRole. Falta abrir el PR | rama [`plt-04-bus`](https://github.com/nubeduca/nubeduca-infra/tree/plt-04-bus) |
+| [PLT-05](https://github.com/nubeduca/nubeduca-backlog/issues/15) API Gateway y borde | Dev 1 | ⚪ Por empezar | — |
+| [ENG-01](https://github.com/nubeduca/nubeduca-backlog/issues/13) Notificaciones por email | Dev 6 | 🟢 Desplegado en `dev` y probado en AWS | [`nubeduca-ms-notificaciones`](https://github.com/nubeduca/nubeduca-ms-notificaciones) |
+| [FE-02](https://github.com/nubeduca/nubeduca-backlog/issues/21) y [FE-03](https://github.com/nubeduca/nubeduca-backlog/issues/25) Pantallas | Dev 6 | 🟡 PRs abiertos | [PR #1](https://github.com/nubeduca/nubeduca-frontend/pull/1), [PR #2](https://github.com/nubeduca/nubeduca-frontend/pull/2) |
 
-**Revisión de ARQ-01:** cada dev revisa lo suyo en el PR de `nubeduca-contratos` (la lista está en su README). Cuando los 6 aprueben, ARQ-01 queda cerrada y LIB-01 puede arrancar.
+**Nombre del bus:** PLT-03 y PLT-04 crean un bus **por stage** (`lms-dev`, `lms-staging`, `lms-prod`) y guardan el nombre en el parámetro SSM `/nubeduca/<stage>/bus-name`. Cada servicio debe leer ese nombre (o el export `nubeduca-<stage>-bus-name`) en vez de escribir `lms` fijo. En LocalStack el bus sigue llamándose `lms`.
 
 **Avances previos que se reutilizan:** `nubeduca-ms-calificaciones` ya tiene una base (`serverless.yml` y tabla) que hizo Mariano. Cuando esté la plantilla de LIB-01, se alinea a los contratos v1 (token de Cognito, camelCase y outbox) para EVA-02 y DAT-01.
 
@@ -173,7 +181,7 @@ Las asignaciones son las de la **arquitectura de solución** (sección 9). Con 6
 
 La rúbrica le da **3 puntos** a la exposición virtual con el asesor y pide un **avance proporcional al 30%**.
 
-**Propuesta (por confirmar con el grupo):** las **olas 1 y 2 completas** más **PLT-04 y PLT-05**, es decir 10 de las 33 tareas.
+**Propuesta (por confirmar con el grupo):** las **olas 1 y 2 completas** más **PLT-04 y PLT-05**, es decir 10 de las 33 tareas. **Hoy van 5 cerradas y 3 casi listas** (LIB-01, PLT-03 y PLT-04); faltan PLT-02 y PLT-05.
 
 | Ola | Tareas |
 |---|---|
@@ -184,9 +192,10 @@ La rúbrica le da **3 puntos** a la exposición virtual con el asesor y pide un 
 **Lo que vería el asesor:**
 - Diagrama de arquitectura
 - Catálogo de eventos y contratos OpenAPI
-- Frontend publicado en Amplify con login simulado
+- Frontend publicado en Amplify con login simulado y las pantallas de FE-02 y FE-03
 - Un endpoint que responde desde Amplify por API Gateway → Lambda
-- La plantilla con un servicio de ejemplo que publica y consume un evento (en local con LocalStack)
+- La plantilla con un servicio de ejemplo que publica y consume un evento sin duplicados (en LocalStack y desplegada en AWS)
+- ms-notificaciones desplegado en AWS: un evento del bus termina en un email
 
 ---
 
@@ -197,7 +206,7 @@ Toda la infraestructura se declara con **Serverless Framework v4**: un `serverle
 | Stack | Qué crea | Repo |
 |---|---|---|
 | `infra/base` | Bucket de despliegue y parámetros SSM compartidos | `nubeduca-infra` |
-| `infra/bus` | Bus `lms` de EventBridge, Schema Registry, Archive y SNS FIFO de notas | `nubeduca-infra` |
+| `bus/` | Bus `lms-<stage>` de EventBridge, Archive y SNS FIFO de notas (Schema Registry bloqueado en el Learner Lab) | `nubeduca-infra` |
 | `infra/auth` | User pool de Cognito con `tenant_id` y rol en el token | `nubeduca-infra` |
 | Cada microservicio | API Gateway + Lambdas + tabla DynamoDB + sus reglas, colas SQS y DLQ de consumidor | `nubeduca-ms-*` |
 | Frontend | Amplify Hosting publica cada merge a `main` | `nubeduca-frontend` |
@@ -245,7 +254,7 @@ Para el curso se entregan la **Fase 0** y la **Fase 1**. La prueba de estrés es
 
 | Fase | Contenido | Gate |
 |---|---|---|
-| **0 · Fundaciones** | Learner Lab, EventBridge + Schema Registry, SQS con DLQ, CI/CD, CloudWatch + X-Ray, Cognito, API Gateway, plantilla de servicio | Un servicio publica por outbox, otro consume de forma idempotente y la traza se ve de punta a punta |
+| **0 · Fundaciones** | Learner Lab, EventBridge (contratos en `nubeduca-contratos`), SQS con DLQ, CI/CD, CloudWatch + X-Ray, Cognito, API Gateway, plantilla de servicio | Un servicio publica por outbox, otro consume de forma idempotente y la traza se ve de punta a punta |
 | **1 · MVP académico** | Tenant, usuarios, cursos, matrícula CSV, contenido y módulos, archivos, tareas y entregas, calificaciones, anuncios, notificaciones y auditoría de notas | Contenido → tarea → entrega → nota → aviso, con 2 tenants |
 | 2 · Evaluación y colaboración | Quizzes (QTI), rúbricas, LTI 1.3, calendario, foros, mensajería, app móvil | — |
 | 3 · Engagement y analítica | Progreso, certificados, LRS (xAPI), reportes, búsqueda | — |
