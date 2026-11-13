@@ -168,7 +168,7 @@ Las asignaciones son las de la **arquitectura de solución** (sección 9). Con 6
 | [ENG-01](https://github.com/nubeduca/nubeduca-backlog/issues/13) Notificaciones por email | Dev 6 | 🟡 Probado en AWS; falta desplegarlo en la cuenta de integración | [`nubeduca-ms-notificaciones`](https://github.com/nubeduca/nubeduca-ms-notificaciones) |
 | [FE-02](https://github.com/nubeduca/nubeduca-backlog/issues/21) y [FE-03](https://github.com/nubeduca/nubeduca-backlog/issues/25) Pantallas | Dev 6 | 🟡 PRs encadenados, ninguno llega a `main` | [PRs #1 a #3](https://github.com/nubeduca/nubeduca-frontend/pulls) |
 | [ACA-02](https://github.com/nubeduca/nubeduca-backlog/issues/10) Usuarios y perfiles | Dev 4 | ⚪ Lista para empezar; **bloquea ACA-04** (ruta crítica) | [`nubeduca-ms-usuarios`](https://github.com/nubeduca/nubeduca-ms-usuarios) |
-| [AUTH-01](https://github.com/nubeduca/nubeduca-backlog/issues/17) Cognito | Dev 2 | ⚪ Lista para empezar | — |
+| [AUTH-01](https://github.com/nubeduca/nubeduca-backlog/issues/17) Cognito | Dev 2 | 🟡 `infra/auth` en `main` (PR #9); falta cerrar el issue y conectar los servicios con `authMode=cognito` | [`nubeduca-backend/infra/auth`](https://github.com/nubeduca/nubeduca-backend/tree/main/infra/auth) |
 
 **Nombre del bus:** `infra/base` y `infra/bus` crean un bus **por stage** (`lms-dev`, `lms-staging`, `lms-prod`) y guardan el nombre en el parámetro SSM `/nubeduca/<stage>/bus-name`. Cada servicio lee ese nombre en vez de escribir `lms` fijo. En LocalStack el bus sigue llamándose `lms`.
 
@@ -198,7 +198,7 @@ Toda la infraestructura se declara con **Serverless Framework v4**: un `serverle
 |---|---|---|
 | `infra/base` | Bucket de despliegue y parámetros SSM compartidos | `nubeduca-backend` |
 | `infra/bus` | Bus `lms-<stage>` de EventBridge, Archive y SNS FIFO de notas | `nubeduca-backend` |
-| `infra/auth` | User pool de Cognito con `tenant_id` y rol en el token (AUTH-01) | `nubeduca-backend` |
+| `infra/auth` | User Pool y App Client de Cognito con `tenant_id` y rol en el token (AUTH-01, en `main`) | `nubeduca-backend` |
 | `infra/frontend` | App y rama de Amplify, rewrite de la SPA y variables `VITE_*` leídas de SSM | `nubeduca-backend` |
 | `infra/despliegue` | VM `nubeduca-despliegue` con `LabInstanceProfile`, sin puertos (Session Manager) | `nubeduca-backend` |
 | Cada microservicio | API Gateway + Lambdas + tabla DynamoDB + regla, cola SQS, DLQ y alarma de su consumidor | `nubeduca-ms-*` |
@@ -208,7 +208,7 @@ Toda la infraestructura se declara con **Serverless Framework v4**: un `serverle
 | Repos (D1) | Un repo por microservicio (`nubeduca-ms-*`, creado desde la plantilla); `nubeduca-backend` es solo infraestructura |
 | Cuenta de integración (D2) | El Learner Lab de Dev 3; se despliega desde la VM con el rol de la instancia |
 | Credenciales | Cada dev usa un `.env` propio (está en `.gitignore`). `scripts/cuenta.sh` verifica la cuenta antes de desplegar |
-| Org de Serverless | Ningún `serverless.yml` fija `org:`; se usa la org del equipo vía `SERVERLESS_ACCESS_KEY` (por crear) |
+| Org de Serverless | Los `serverless.yml` no fijan `org:` (salvo `infra/auth`, provisional); se usa la org del equipo vía `SERVERLESS_ACCESS_KEY` (por crear) |
 | Conexión entre stacks | Por parámetros SSM `/nubeduca/<stage>/...`; nadie copia ARNs a mano |
 | Consumidores | Cada servicio declara en su propio stack la regla de EventBridge, su cola, su DLQ y su alarma; el bus solo se crea en `infra/bus` |
 | CI | GitHub Actions en cada repo: lint y tests en cada PR; `nubeduca-contratos` valida los esquemas y su compatibilidad |
