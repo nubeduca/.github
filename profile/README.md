@@ -55,7 +55,7 @@ La rúbrica manda: si el diseño choca con ella, gana la rúbrica.
 2. El usuario inicia sesión en **Amazon Cognito**. El token trae `tenant_id` y rol.
 3. Cada llamada va a la **API Gateway** del microservicio dueño. El authorizer de Cognito valida el token, y la Lambda toma `tenant_id` del token, nunca del body.
 4. La **Lambda** escribe el cambio en la tabla **DynamoDB** de su microservicio y, en la misma transacción, el evento (registro `EVENTO#`) **validado contra su esquema**. Ningún microservicio lee la tabla de otro. Los archivos suben directo a **S3** con URL prefirmada.
-5. **DynamoDB Streams** lleva cada evento al bus **`lms-<stage>`** con una Lambda relay (o con **EventBridge Pipes**, `--param="outbox=pipe"`, pendiente de validar en el Learner Lab). **Archive** permite reprocesar. Los esquemas viven en el repo [`nubeduca-contratos`](https://github.com/nubeduca/nubeduca-contratos), que la CI valida (el Schema Registry no está disponible en el Learner Lab).
+5. **DynamoDB Streams** lleva cada evento al bus **`lms-<stage>`** con **EventBridge Pipes** (ADR-008). La Lambda relay (`--param="outbox=lambda"`) queda como vuelta atrás. **Archive** permite reprocesar. Los esquemas viven en el repo [`nubeduca-contratos`](https://github.com/nubeduca/nubeduca-contratos), que la CI valida (el Schema Registry no está disponible en el Learner Lab).
 6. Una **regla** por consumidor copia el evento a su cola **SQS** con **DLQ**. La Lambda consumidora lo procesa una sola vez (idempotente).
 7. ms-calificaciones publica además las notas en **SNS FIFO** con grupo `tenant_id:course_id`, y llegan en orden a la cola **SQS FIFO** de ms-notificaciones.
 8. ms-notificaciones avisa por **email** con Amazon SNS, según las preferencias del usuario.
@@ -82,6 +82,7 @@ La rúbrica manda: si el diseño choca con ella, gana la rúbrica.
 | ADR-005 | **Pool:** los 3 tenants comparten tablas, con `tenant_id` en la clave |
 | ADR-006 | **Lambda + API Gateway** para el cómputo |
 | ADR-007 | **DynamoDB** en los 6 microservicios (sin VPC ni RDS) |
+| ADR-008 | **Outbox con EventBridge Pipes** (Stream → bus, sin Lambda) en staging y prod; el relay (`outbox=lambda`) queda como vuelta atrás ([#35](https://github.com/nubeduca/nubeduca-backlog/issues/35)) |
 
 El documento completo de arquitectura de solución (contexto, mapa de capacidades vs. Moodle/Canvas/Blackboard, catálogo de 21 servicios, patrones, stack, riesgos y prueba de estrés) lo mantiene Dev 3.
 
@@ -113,7 +114,7 @@ Los **16 eventos** del MVP siguen el formato `lms.<contexto>.<entidad>.<hecho>.v
 | [`nubeduca-contratos`](https://github.com/nubeduca/nubeduca-contratos) | Catálogo de 16 eventos, JSON Schema, OpenAPI de los 6 microservicios y validación en CI | Dev 3 | 🟢 v1 publicada (ARQ-01) |
 | [`nubeduca-backend`](https://github.com/nubeduca/nubeduca-backend) | Solo infraestructura (D1): `infra/base`, `infra/bus`, `infra/frontend` (Amplify), `infra/despliegue` (VM), `localstack/` y `scripts/desplegar.sh` | Dev 1 y 2 | 🟢 Base, bus, CORS y Amplify como IaC en `main`; `desplegar.sh` y la VM en [PR #8](https://github.com/nubeduca/nubeduca-backend/pull/8) |
 | [`nubeduca-frontend`](https://github.com/nubeduca/nubeduca-frontend) | React + TypeScript + Vite en Amplify, con mocks MSW hasta AUTH-01 | Dev 6 | 🟡 FE-01 publicado; FE-02, FE-03 y avisos reales en PRs #1, #2 y #3 (encadenados) |
-| [`nubeduca-plantilla-servicio`](https://github.com/nubeduca/nubeduca-plantilla-servicio) | Plantilla que copia cada microservicio: outbox, inbox idempotente, validación de esquemas y `serverless.yml` base | Dev 3 y 5 | 🟢 LIB-01 cerrado (15 tests); X-Ray y alarmas en PR #4 |
+| [`nubeduca-plantilla-servicio`](https://github.com/nubeduca/nubeduca-plantilla-servicio) | Plantilla que copia cada microservicio: outbox, inbox idempotente, validación de esquemas y `serverless.yml` base | Dev 3 y 5 | 🟢 LIB-01 cerrado (15 tests); X-Ray, alarma de DLQ y URL del API en SSM (PLT-06, #6) |
 | [`nubeduca-ms-usuarios`](https://github.com/nubeduca/nubeduca-ms-usuarios) | Tenant, periodos, usuarios y perfiles | Dev 3 y 4 | 🟢 ACA-01 en `main` (29 tests); ACA-02 pendiente |
 | [`nubeduca-ms-cursos`](https://github.com/nubeduca/nubeduca-ms-cursos) | Cursos, secciones, matrícula CSV y anuncios | Dev 3 y 4 | 🟢 ACA-03 en `main` (37 tests, seed de 30.000); ACA-04 y COL-01 pendientes |
 | [`nubeduca-ms-contenidos`](https://github.com/nubeduca/nubeduca-ms-contenidos) | Archivos en S3 con antivirus, módulos e ítems | Dev 5 | ⚪ Solo README |
